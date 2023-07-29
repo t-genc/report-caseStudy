@@ -1,88 +1,33 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Button, Image, View, Text, Platform, StyleSheet, StatusBar, Pressable, TextInput, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { Image, View, Platform, StyleSheet, StatusBar, Pressable, TextInput, Alert } from 'react-native';
 import { uploadImage } from '@/api/media';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { FontAwesome, FontAwesome5, Feather } from '@expo/vector-icons';
 import { MonoText } from '@/components/StyledText';
 import Colors from '@/constants/Colors';
-import { Camera, CameraType, PermissionStatus } from 'expo-camera';
-import * as Location from 'expo-location';
-import { getReverseGeocode } from '@/api/location';
+import { Camera } from 'expo-camera';
 import { ReportData, ReportType } from '@/types';
 import { Link } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
 import { useReportStore } from '@/store';
 import submitReport from '@/api/report';
-import { Coords } from '@/types';
-
+import useCamera from '@/hooks/useCamera';
+import useLocation from '@/hooks/useLocation';
 export default function MainScreen() {
-  const [location, updateLocation, photoUrl, updatePhotoUrl, reportType, updateReportType, comment, updateComment, qrCode] = useReportStore((state) => [state.location, state.updateLocation, state.photoUrl, state.updatePhotoUrl, state.reportType, state.updateReportType, state.comment, state.updateComment, state.qrCode]
+  const [address, userCoords, updateUserAddress, photoUrl, reportType, updateReportType, comment, updateComment, qrCode] = useReportStore((state) => [state.address, state.userCoords, state.updateUserAddress, state.photoUrl, state.reportType, state.updateReportType, state.comment, state.updateComment, state.qrCode]
   )
-  const [cameraType, setCameraType] = useState(CameraType.back);
-  const [permission, requestPermission] = Camera.useCameraPermissions();
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [userCoords, setUserCoords] = useState<Coords | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const cameraRef = useRef<Camera>(null);
-  useEffect(() => {
-    (async () => {
-      try {
-        let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission to access your location was denied');
-          return;
-        }
-        let location = await Location.getCurrentPositionAsync({});
-        const { latitude, longitude } = location.coords;
-        setUserCoords({ latitude, longitude })
-        const address = await getReverseGeocode({ latitude, longitude });
-        if (address) {
-          updateLocation(address);
-        }
-      }
-      catch (error) {
-        Alert.alert("An error occurred while getting your location")
-        console.log(error)
-      }
-    }
-    )();
-  }, []);
+  const { cameraRef, cameraType, isCameraOpen, startCamera, takePicture, pickImage } = useCamera();
+  useLocation()
 
-  const pickImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-    });
-    if (!result.canceled && result.assets.length) {
-      updatePhotoUrl(result.assets[0].uri);
-      setIsCameraOpen(false);
-    }
-  };
-  const takePicture = async () => {
-    if (!permission || !permission.granted) return requestPermission();
-    if (cameraRef.current && isCameraReady) {
-      const photo = await cameraRef.current.takePictureAsync();
-      if (photo.uri) updatePhotoUrl(photo.uri)
-      setIsCameraOpen(false);
-    }
-  }
-  const startCamera = async () => {
-    if (!permission || !permission.granted) return requestPermission();
-    updatePhotoUrl(null);
-    setIsCameraOpen(true);
-  }
 
   const checkFields = () => {
     if (!photoUrl) {
       Alert.alert("Please take a photo")
       return;
     }
-    if (!location) {
+    if (!address) {
       Alert.alert("Please enter your location")
       return;
     }
@@ -100,18 +45,18 @@ export default function MainScreen() {
     }
     return true;
   }
-
   const handleSubmitReport = async () => {
     if (!checkFields()) return;
+
     setIsSubmitting(true)
-    const publicUrl = await uploadImage(photoUrl);
+    const publicUrl = await uploadImage(photoUrl)
     if (publicUrl) {
       const data: ReportData = {
         'phone': process.env.EXPO_PUBLIC_PHONE_NUMBER,
         'qrCode': qrCode,
         'userLocation.lat': userCoords?.latitude,
         'userLocation.lon': userCoords?.longitude,
-        'userLocation.detail': location,
+        'userLocation.detail': address,
         'photo': publicUrl,
         'type.broken': reportType === ReportType.DEFECTIVE,
         'type.parking': reportType === ReportType.PARKING,
@@ -121,7 +66,6 @@ export default function MainScreen() {
       const response = await submitReport(data);
       if (response) {
         Alert.alert("Your report has been submitted")
-
       }
       else {
         Alert.alert("Something went wrong while submitting your report")
@@ -129,15 +73,14 @@ export default function MainScreen() {
     }
     else {
       Alert.alert("An error occurred while uploading image")
-
     }
     setIsSubmitting(false)
   }
-
+  
   return (
     <SafeAreaView style={styles.container}>
       {
-        isCameraOpen ? <Camera type={cameraType} ref={cameraRef} onCameraReady={() => setIsCameraReady(true)} style={[StyleSheet.absoluteFill, { justifyContent: "flex-end" }]} >
+        isCameraOpen ? <Camera type={cameraType} ref={cameraRef} style={[StyleSheet.absoluteFill, { justifyContent: "flex-end" }]} >
           <View style={styles.cameraBtns}>
             <Pressable onPress={takePicture}  >
               <FontAwesome name="camera" size={24} color="#fff" />
@@ -155,8 +98,8 @@ export default function MainScreen() {
                   placeholder='Your Location'
                   placeholderTextColor='#f6dcee'
                   style={styles.text}
-                  value={location}
-                  onChangeText={(text) => updateLocation(text)}
+                  value={address}
+                  onChangeText={(text) => updateUserAddress(text)}
                 />
                 <FontAwesome5 name="map-marked" size={16} color="#fff" />
               </View>
